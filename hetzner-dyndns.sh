@@ -65,6 +65,7 @@ get_current_public_ip () {
 
 get_rrset_id () {
   response=$(curl_call GET "zones/${1}/rrsets" | jq -r '(.rrsets? // []) | map(select(.name=="'${2}'" and .type=="'${3}'")) | (.[0]?.id // empty)' | head -n1)
+   echo "${response}"
 }
 
 get_rrset_current_value () {
