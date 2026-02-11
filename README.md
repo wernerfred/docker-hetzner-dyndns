@@ -8,7 +8,7 @@
 
 # docker-hetzner-dyndns
 
-This project aims to provide a standalone container that dynamically updates the assigned public IP of its ISP connection for a record managed by [Hetzner DNS Console](https://www.hetzner.com/de/dns-console).
+This project aims to provide a standalone container that dynamically updates the assigned public IP of its ISP connection for a record managed by [Hetzner DNS ](https://www.hetzner.com/dns/).
 
 ## Installation
 
@@ -41,22 +41,22 @@ docker run -d \
 
 The following environment variables can be used to configure the container:
 
-| Variable                | Default | Description | Example |
-|-------------------------|---------|-------------|---------|
-| `RECORD_NAME`           |         | The DNS record nameto use  | `home` |
-| `RECORD_TYPE`           |         | The DNS record type to use | `A`    |
-| `ZONE_ID`               |         | The DNS zone id            | `123456abcde7890` |
-| `SLEEP_INTERVAL`        | `60`    | The interval to sleep between checks | `120` |	
-| `HETZNER_DNS_API_TOKEN` |         | The Hetzner DNS Console API token | `ab12345cdefgh67890ijklmn` |
+| Variable            | Default | Description                          | Example                    |
+| ------------------- | ------- | ------------------------------------ | -------------------------- |
+| `RECORD_NAME`       |         | The DNS record nameto use            | `home`                     |
+| `RECORD_TYPE`       |         | The DNS record type to use           | `A`                        |
+| `ZONE_ID`           |         | The DNS zone id                      | `123456abcde7890`          |
+| `SLEEP_INTERVAL`    | `60`    | The interval to sleep between checks | `120`                      |
+| `HETZNER_API_TOKEN` |         | The Hetzner DNS Console API token    | `ab12345cdefgh67890ijklmn` |
 
-Simply add the  environment variables you want to change to your `docker run` command:
+Simply add the environment variables you want to change to your `docker run` command:
 
 ```
 docker run -d \
            -e RECORD_NAME=<name> \
            -e RECORD_TYPE=<type> \
            -e ZONE_ID=<id> \
-           -e HETZNER_DNS_API_TOKEN=<token> \
+           -e HETZNER_API_TOKEN=<token> \
            -e SLEEP_INTERVAL=<interval>
            wernerfred/docker-hetzner-dyndns
 ```
