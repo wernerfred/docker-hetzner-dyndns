@@ -16,9 +16,9 @@
 #     You should have received a copy of the GNU General Public License
 #     along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-HETZNER_DNS_API_URL="${HETZNER_DNS_API_URL:-"https://dns.hetzner.com/api/v1"}"
-HETZNER_DNS_API_TOKEN="${HETZNER_DNS_API_TOKEN:-}"
-HETZNER_DNS_API_REQUIRED_TOOLS=(
+HETZNER_API_URL="${HETZNER_API_URL:-"https://api.hetzner.cloud/v1"}"
+HETZNER_API_TOKEN="${HETZNER_API_TOKEN:-}"
+HETZNER_API_REQUIRED_TOOLS=(
   "curl"
   "jq"
   "dig"
@@ -53,75 +53,35 @@ curl_call () {
     --location \
     --show-error \
     --request "${1}" \
-    "${HETZNER_DNS_API_URL}"/"${2}" \
-    -H "Auth-API-Token: ${HETZNER_DNS_API_TOKEN}" \
+    "${HETZNER_API_URL}"/"${2}" \
+    -H "Authorization: Bearer ${HETZNER_API_TOKEN}" \
     -H 'Content-Type: application/json; charset=utf-8' \
     -d "${3}"
-}
-
-get_single_zone () {
-  response=$(curl_call GET "zones/${1}")
-  if [[ $(echo "${response}" | jq -r 'has("error")') == "true" ]]
-  then
-    echo "ERROR: Zone with ID '${1}' not found."
-    exit 1
-  fi
-}
-
-get_all_records () {
-  response=$(curl_call GET "records?zone_id=${1}")
-  echo "${response}"
-}
-
-get_record_by_name () {
-  response=$(get_all_records "${1}" | jq -r '.records[] | select(.type == "'${2}'") | select(.name == "'${3}'") | .id')
-  if [ -z "$response" ]
-  then
-    echo "INFO: Record with name '${RECORD_NAME}' not found."
-    return 1
-  else
-    RECORD_ID="${response}"
-    return 0
-  fi
-}
-
-get_record_by_id () {
-  response=$(curl_call GET "records/${RECORD_ID}")
-  echo "${response}"
-}
-
-create_record () {
-  echo "INFO: Creating record with name '${RECORD_NAME}'."
-  payload="{\"value\": \"${1}\", \"ttl\": ${2}, \"type\": \"${3}\", \"name\": \"${4}\", \"zone_id\": \"${5}\"}"
-  response=$(curl_call POST records "$payload")
-  if [[ $(echo "${response}" | jq -r 'has("error")') == "true" ]]
-  then
-    error=$(echo "${response}" | jq -r '.error | .message')
-    echo "ERROR: Could not create record: ${error}"
-    exit 1
-  else
-    RECORD_ID=$(echo "${response}" | jq -r '.record | .id')
-    return 0
-  fi
-}
-
-update_record () {
-  payload="{\"value\": \"${1}\", \"ttl\": ${2}, \"type\": \"${3}\", \"name\": \"${4}\", \"zone_id\": \"${5}\"}"
-  response=$(curl_call PUT "records/${RECORD_ID}" "$payload")
-  if [[ $(echo "${response}" | jq -r 'has("error")') == "true" ]]
-  then
-    error=$(echo "${response}" | jq -r '.error | .message')
-    echo "ERROR: Could not update record: ${error}"
-    exit 1
-  else
-    echo "INFO: Updated record successfully. New value of record '${RECORD_NAME}' is '${RECORD_VALUE}'."
-    return 0
-  fi
 }
 
 get_current_public_ip () {
   RECORD_VALUE=$(${1} | awk -F '"' '{print $2}')
 }
+
+get_rrset_id () {
+  response=$(curl_call GET "zones/${1}/rrsets" | jq -r '(.rrsets? // []) | map(select(.name=="'${2}'" and .type=="'${3}'")) | (.[0]?.id // empty)' | head -n1)
+}
+
+get_rrset_current_value () {
+  response=$(curl_call GET "zones/${1}/rrsets" | jq -r '(.rrsets? // []) | map(select(.name=="'${2}'" and .type=="'${3}'")) | (.[0]?.records? // []) | (.[0]?.value // empty)' | head -n1)
+  echo "${response}"
+}
+
+create_rrset () {
+  payload="$(printf '%s\0%s\0%s\0%s' "${2}" "${3}" "${4}" "${RECORD_TTL}" | jq -Rs 'split("\u0000") as $i | {name:$i[0], type:$i[1], ttl:($i[3]|tonumber), records:[{value:$i[2]}]}')"
+  response=$(curl_call POST "zones/${1}/rrsets" "$payload")
+}
+
+set_rrset_records() {
+  payload="$(jq -nc --arg v "${3}" '{records:[{value:$v}]}')"
+  response=$(curl_call POST "zones/${1}/rrsets/${2}/actions/set_records" "${payload}")
+}
+
 
 while getopts ":hz:R:t:T:" opt
 do
@@ -142,33 +102,27 @@ do
   esac
 done
 
-for tool in "${HETZNER_DNS_API_REQUIRED_TOOLS[@]}"
+for tool in "${HETZNER_API_REQUIRED_TOOLS[@]}"
 do
   check_required_tools "${tool}"
 done
 
-if [ -z "${HETZNER_DNS_API_TOKEN}" ]
+if [ -z "${HETZNER_API_TOKEN}" ]
 then
-  echo "ERROR: Variable 'HETZNER_DNS_API_TOKEN' not set."
+  echo "ERROR: Variable 'HETZNER_API_TOKEN' not set."
   exit 1
 fi
 
-#check if zone is valid
-get_single_zone "${ZONE_ID}"
-
 if [[ "$RECORD_TYPE" == "A" ]]
 then
-  query="dig TXT +short o-o.myaddr.l.google.com @ns1.google.com"
+  query="dig -4 TXT +short o-o.myaddr.l.google.com @ns1.google.com"
   get_current_public_ip "$query"
 else
   query="dig -6 TXT +short o-o.myaddr.l.google.com @ns1.google.com"
   get_current_public_ip "$query"
 fi
 
-#get record id by name or create record if it doesn't exist
-get_record_by_name "${ZONE_ID}" "${RECORD_TYPE}" "${RECORD_NAME}" || create_record "${RECORD_VALUE}" "${RECORD_TTL}" "${RECORD_TYPE}" "${RECORD_NAME}" "${ZONE_ID}"
-
-RECORD_VALUE_UPSTREAM=$(get_record_by_id "${RECORD_ID}" | jq -r '.record | .value')
+RECORD_VALUE_UPSTREAM="$(get_rrset_current_value "${ZONE_ID}" "${RECORD_NAME}" "${RECORD_TYPE}" || true)"
 
 if [[ "$RECORD_VALUE_UPSTREAM" == "$RECORD_VALUE" ]]
 then
@@ -177,5 +131,11 @@ then
 else
   echo "INFO: Upstream value of record '${RECORD_NAME}' is set to '$RECORD_VALUE_UPSTREAM' and diverges from new value '$RECORD_VALUE'."
   echo "INFO: Updating upstream value of record '${RECORD_NAME}' to new value '$RECORD_VALUE'."
-  update_record "${RECORD_VALUE}" "${RECORD_TTL}" "${RECORD_TYPE}" "${RECORD_NAME}" "${ZONE_ID}"
+  RRSET_ID="$(get_rrset_id "${ZONE_ID}" "${RECORD_NAME}" "${RECORD_TYPE}" || true)"
+  if [[ -n "${RRSET_ID}" ]]; then
+    set_rrset_records "${ZONE_ID}" "${RRSET_ID}" "${RECORD_VALUE}"
+  else
+    create_rrset "${ZONE_ID}" "${RECORD_NAME}" "${RECORD_TYPE}" "${RECORD_VALUE}"
+  fi
+
 fi
